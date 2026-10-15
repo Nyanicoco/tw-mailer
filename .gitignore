@@ -1,0 +1,6 @@
+# ignore compiled files
+server/Main
+client/Main
+
+# ignore ide
+.vscode/
