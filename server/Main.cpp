@@ -91,7 +91,7 @@ void handle_client(int client_fd, const std::string &spoolDir){
                     std::getline(inFile, r);
                     std::getline(inFile, subj);
             
-                    listDetails += std::to_string(i) + "\n" + subj + "\n";
+                    listDetails += subj + "\n";
                 }
             }
 
@@ -112,7 +112,7 @@ void handle_client(int client_fd, const std::string &spoolDir){
                 while(std::getline(inFile, line)){
                     fileContent += line + "\n";
                 }
-                std::string response = "OK\n" + fileContent;
+                std::string response = "OK\n" + fileContent + ".\n";
                 write(client_fd, response.c_str(), response.size());
             } else {
                 std::string response = "ERR\n";
