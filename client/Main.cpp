@@ -4,6 +4,10 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include "MailerClient.h"
+
+#include <cstdio>   // für perror
+#include <cstdint>  // für uint16_t
 
 int main(int argc, char* argv[]) {
 
@@ -71,6 +75,10 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "Verbindung zum Server erfolgreich!\n";
+
+
+    MailerClient client(socket_fd);
+    client.run();
 
     // Close the connection
 
