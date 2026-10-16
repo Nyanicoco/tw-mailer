@@ -15,7 +15,7 @@ int main(int argc, char *argv[]) {
     std::cout << "Server, expects the port it should listen on\n";
     std::cout << "Total Argument passed: " << (argc - 1) << std::endl;
     std::cout << "Port is: " << (argv[1]) << std::endl;
-    int port = *argv[1];
+    int port = std::stoi(argv[1]);
     int socket_fd;
     struct  sockaddr_in my_addr;
     
