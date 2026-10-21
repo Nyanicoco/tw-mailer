@@ -149,7 +149,7 @@ bool MailerClient::sendAll(const std::string& data) {
     if (bytesSent == -1) {
         perror("send failed");
     } else {
-        std::cerr << "Keine Daten gesendet\n";
+        std::cerr << "no data sended\n";
     }
     return false;
 }
@@ -178,7 +178,7 @@ bool MailerClient::readLine(std::string& line) {
             return false;
         }
         if (bytesReceived == 0) {
-            std::cerr << "Server hat die Verbindung geschlossen\n";
+            std::cerr << "Server ends the connection\n";
             return false;
         }
 
@@ -195,14 +195,14 @@ void MailerClient::sendMessage() {
     if (!readUsername("Sender: ", sender)) {
         return;
     }
-    if (!readUsername("Empfänger: ", receiver)) {
+    if (!readUsername("receiver: ", receiver)) {
         return;
     }
-    if (!readInput("Betreff (max. 80 Zeichen): ", subject)) {
+    if (!readInput("subject (max. 80 char): ", subject)) {
         return;
     }
     if (subject.empty() || subject.size() > MAX_SUBJECT_LENGTH) {
-        std::cerr << "Ungültiger Betreff: 1 bis 80 Zeichen erlaubt\n";
+        std::cerr << "invalid subject 1 to 80 Zeichen allowed\n";
         return;
     }
 
@@ -280,7 +280,7 @@ void MailerClient::readMessage() {
     std::string username;
     std::string number;
 
-    if (!readUsername("Benutzername: ", username)) {
+    if (!readUsername("username: ", username)) {
         return;
     }
     if (!readMessageNumber(number)) {
