@@ -13,7 +13,7 @@ namespace {
 const size_t MAX_USERNAME_LENGTH = 8;
 const size_t MAX_SUBJECT_LENGTH = 80;
 
-// Prüft: 1 bis 8 Zeichen, nur Kleinbuchstaben a-z und Ziffern 0-9
+// Checks: 1 to 8 Zeichen, only a-z and number 0-9
 bool isValidUsername(const std::string& name) {
     if (name.empty() || name.size() > MAX_USERNAME_LENGTH) {
         return false;
@@ -28,7 +28,7 @@ bool isValidUsername(const std::string& name) {
     return true;
 }
 
-// Prüft: mindestens eine Ziffer, nur Ziffern
+// Checks : min. one number only number
 bool isValidNumber(const std::string& text) {
     if (text.empty()) {
         return false;
@@ -41,35 +41,35 @@ bool isValidNumber(const std::string& text) {
     return true;
 }
 
-// Liest eine ganze Zeile von der Tastatur. Liefert false bei EOF (Strg+D)
+// reads only one line if false EOF (Strg+D)
 bool readInput(const std::string& prompt, std::string& input) {
     std::cout << prompt;
     if (!std::getline(std::cin, input)) {
-        std::cerr << "\nEingabe beendet\n";
+        std::cerr << "\nEnter\n";
         return false;
     }
     return true;
 }
 
-// Liest und prüft einen Benutzernamen
+// read und checks the username
 bool readUsername(const std::string& prompt, std::string& name) {
     if (!readInput(prompt, name)) {
         return false;
     }
     if (!isValidUsername(name)) {
-        std::cerr << "Ungültiger Benutzername: max. 8 Zeichen, nur a-z und 0-9\n";
+        std::cerr << "Invalid username: max. 8 char, only a-z and 0-9\n";
         return false;
     }
     return true;
 }
 
-// Liest und prüft eine Nachrichtennummer
+// only reads and checks the message number
 bool readMessageNumber(std::string& number) {
     if (!readInput("Nachrichtennummer: ", number)) {
         return false;
     }
     if (!isValidNumber(number)) {
-        std::cerr << "Ungültige Nachrichtennummer: nur Ziffern erlaubt\n";
+        std::cerr << "Invalid message number: only numbers allowed\n";
         return false;
     }
     return true;

@@ -29,11 +29,11 @@ int main(int argc, char* argv[]) {
 
         if (pos != std::string(argv[2]).size()
             || port < 1 || port > 65535) {
-            std::cerr << "Ungueltiger Port\n";
+            std::cerr << "invalid port\n";
             return 1;
         }
     } catch (...) {
-        std::cerr << "Port muss eine Zahl sein\n";
+        std::cerr << "Port must contain one number\n";
         return 1;
     }
 
