@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
     //convert the IP adress from text to binary
     if (inet_pton(AF_INET, ip.c_str(),
                   &server_addr.sin_addr) != 1) {
-        std::cerr << "Ungueltige IP-Adresse\n";
+        std::cerr << "invalid IP adress\n";
         close(socket_fd);
         return 1;
     }
@@ -74,7 +74,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "Verbindung zum Server erfolgreich!\n";
+    std::cout << "connection succesfull with the server!\n";
 
 
     MailerClient client(socket_fd);

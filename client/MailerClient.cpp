@@ -7,13 +7,6 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
-#include "MailerClient.h"
-
-#include <cstdio>
-#include <iostream>
-#include <string>
-#include <sys/socket.h>
-#include <sys/types.h>
 
 namespace {
 
@@ -86,31 +79,31 @@ bool readMessageNumber(std::string& number) {
 
 MailerClient::MailerClient(int socketFd) : m_socketFd(socketFd) {}
 
-// Zeigt die verfügbaren Befehle
+// shows the Dashboard
 void MailerClient::showMenu() {
     std::cout << "\n--- TW-Mailer ---\n"
-              << "1  Nachricht senden\n"
-              << "2  Nachrichten auflisten\n"
-              << "3  Nachricht lesen\n"
-              << "4  Nachricht löschen\n"
-              << "5  Beenden\n";
+              << "1  Send message\n"
+              << "2  List message\n"
+              << "3  Read message\n"
+              << "4  Delete message\n"
+              << "5  Quit\n";
 }
 
-// Hauptschleife: liest Befehle und ruft die passende Funktion auf
+// reads the Commands for the correct function
 void MailerClient::run() {
     std::string choice;
 
     while (true) {
         showMenu();
 
-        if (!readInput("Auswahl: ", choice)) {
-            sendAll("QUIT\n"); // bei EOF sauber abmelden
+        if (!readInput("Option: ", choice)) {
+            sendAll("QUIT\n"); //  EOF quits correct
             return;
         }
 
-        // Nur genau ein Zeichen ist gültig
+        // Only one char is valid
         if (choice.size() != 1) {
-            std::cerr << "Ungültige Auswahl: bitte 1 bis 5 eingeben\n";
+            std::cerr << "Option invalid: please enter 1 to 5 \n";
             continue;
         }
 
@@ -128,22 +121,22 @@ void MailerClient::run() {
                 deleteMessage();
                 break;
             case '5':
-                sendAll("QUIT\n"); // Server antwortet nicht auf QUIT
-                std::cout << "Abgemeldet.\n";
+                sendAll("QUIT\n"); // Server answers with QUIT
+                std::cout << "logged off.\n";
                 return;
             default:
-                std::cerr << "Ungültige Auswahl: bitte 1 bis 5 eingeben\n";
+                std::cerr << "Invalid option: please enter 1 to 5 \n";
                 break;
         }
     }
 }
 
-// Sendet alle Bytes, auch wenn send() nur einen Teil überträgt
+// sends all Bytes, even if send() only get one part
 bool MailerClient::sendAll(const std::string& data) {
     size_t totalSent = 0;
 
     while (totalSent < data.size()) {
-        // MSG_NOSIGNAL verhindert einen Absturz durch SIGPIPE,
+        // MSG_NOSIGNAL prevent crash with SIGPIPE,
         // falls der Server die Verbindung geschlossen hat
         ssize_t bytesSent = send(
             m_socketFd,
@@ -167,7 +160,7 @@ bool MailerClient::sendAll(const std::string& data) {
     return true;
 }
 
-// Liest genau eine Zeile (bis '\n') vom Server
+// Reads only one line till ('\n') from the Server
 bool MailerClient::readLine(std::string& line) {
     while (true) {
         size_t pos = m_readBuffer.find('\n');
@@ -193,7 +186,7 @@ bool MailerClient::readLine(std::string& line) {
     }
 }
 
-// SEND\n<Sender>\n<Empfänger>\n<Betreff>\n<Nachricht...>\n.\n
+// SEND\n<Sender>\n<Client>\n<subject>\n<message...>\n.\n
 void MailerClient::sendMessage() {
     std::string sender;
     std::string receiver;
@@ -215,12 +208,12 @@ void MailerClient::sendMessage() {
 
     std::string request = "SEND\n" + sender + "\n" + receiver + "\n" + subject + "\n";
 
-    std::cout << "Nachricht eingeben. Eine Zeile mit nur \".\" beendet die Eingabe:\n";
+    std::cout << "Enter the Mail. One Line with only \".\" end the input:\n";
 
     std::string line;
     while (true) {
         if (!std::getline(std::cin, line)) {
-            std::cerr << "Eingabe abgebrochen, Nachricht nicht gesendet\n";
+            std::cerr << "Input failed message can not be sent\n";
             return;
         }
         request += line + "\n";
@@ -239,16 +232,16 @@ void MailerClient::sendMessage() {
     }
 
     if (response == "OK") {
-        std::cout << "Nachricht gesendet.\n";
+        std::cout << "Message sent.\n";
     } else {
-        std::cerr << "Server meldet Fehler: " << response << "\n";
+        std::cerr << "Server reports an error: " << response << "\n";
     }
 }
 
-// LIST\n<Benutzername>\n
+// LIST\n<username>\n
 void MailerClient::listMessages() {
     std::string username;
-    if (!readUsername("Benutzername: ", username)) {
+    if (!readUsername("Username: ", username)) {
         return;
     }
 
@@ -256,7 +249,7 @@ void MailerClient::listMessages() {
         return;
     }
 
-    // Erste Zeile: Anzahl der Nachrichten
+    // First Line: count the message
     std::string countLine;
     if (!readLine(countLine)) {
         return;
@@ -266,13 +259,13 @@ void MailerClient::listMessages() {
     try {
         count = std::stoi(countLine);
     } catch (...) {
-        std::cerr << "Ungültige Antwort vom Server: " << countLine << "\n";
+        std::cerr << "Invalid answer from the server: " << countLine << "\n";
         return;
     }
 
-    std::cout << "Anzahl Nachrichten: " << count << "\n";
+    std::cout << "message count" << count << "\n";
 
-    // Pro Nachricht eine Zeile mit dem Betreff
+    // each message 
     for (int i = 0; i < count; ++i) {
         std::string subject;
         if (!readLine(subject)) {
@@ -282,7 +275,7 @@ void MailerClient::listMessages() {
     }
 }
 
-// READ\n<Benutzername>\n<Nachrichtennummer>\n
+// READ\n<username>\n<message number>\n
 void MailerClient::readMessage() {
     std::string username;
     std::string number;
@@ -304,11 +297,11 @@ void MailerClient::readMessage() {
     }
 
     if (response != "OK") {
-        std::cerr << "Nachricht nicht gefunden (" << response << ")\n";
+        std::cerr << "Message not found (" << response << ")\n";
         return;
     }
 
-    // Annahme: der Server beendet die Nachricht mit ".\n"
+    // server did not get the message ".\n"
     std::string line;
     while (readLine(line)) {
         if (line == ".") {
@@ -318,12 +311,12 @@ void MailerClient::readMessage() {
     }
 }
 
-// DEL\n<Benutzername>\n<Nachrichtennummer>\n
+// DEL\n<username>\n<messagenumber>\n
 void MailerClient::deleteMessage() {
     std::string username;
     std::string number;
 
-    if (!readUsername("Benutzername: ", username)) {
+    if (!readUsername("username: ", username)) {
         return;
     }
     if (!readMessageNumber(number)) {
@@ -340,8 +333,8 @@ void MailerClient::deleteMessage() {
     }
 
     if (response == "OK") {
-        std::cout << "Nachricht gelöscht.\n";
+        std::cout << "Message deleted.\n";
     } else {
-        std::cerr << "Löschen fehlgeschlagen (" << response << ")\n";
+        std::cerr << "Deletion failed (" << response << ")\n";
     }
 }
