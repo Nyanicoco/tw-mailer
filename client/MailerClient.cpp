@@ -65,7 +65,7 @@ bool readUsername(const std::string& prompt, std::string& name) {
 
 // only reads and checks the message number
 bool readMessageNumber(std::string& number) {
-    if (!readInput("Nachrichtennummer: ", number)) {
+    if (!readInput("message number: ", number)) {
         return false;
     }
     if (!isValidNumber(number)) {
