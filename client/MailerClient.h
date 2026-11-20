@@ -11,6 +11,7 @@ public:
     void run();
 
       // Client-
+    void login();
     void sendMessage();
     void listMessages();
     void readMessage();
@@ -18,6 +19,8 @@ public:
 
     private:
     int m_socketFd; // saves the Socket Deskriptor
+    bool m_loggedIn;
+    bool m_connected;
     std::string m_readBuffer;
 // function for the communication
     bool sendAll(const std::string& data);

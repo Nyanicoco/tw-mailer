@@ -4,3 +4,14 @@ client/Main
 
 # ignore ide
 .vscode/
+
+# Compiled executables
+/twmailer-client
+/twmailer-server
+/client/client
+
+# Object files
+*.o
+
+# VS Code
+.vscode/
