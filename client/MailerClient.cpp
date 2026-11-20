@@ -6,6 +6,9 @@
 #include <string>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <termios.h>
+#include <unistd.h>
+#include <cerrno>
 
 
 namespace {
@@ -13,20 +16,6 @@ namespace {
 const size_t MAX_USERNAME_LENGTH = 8;
 const size_t MAX_SUBJECT_LENGTH = 80;
 
-// Checks: 1 to 8 Zeichen, only a-z and number 0-9
-bool isValidUsername(const std::string& name) {
-    if (name.empty() || name.size() > MAX_USERNAME_LENGTH) {
-        return false;
-    }
-    for (char c : name) {
-        bool isLower = (c >= 'a' && c <= 'z');
-        bool isDigit = (c >= '0' && c <= '9');
-        if (!isLower && !isDigit) {
-            return false;
-        }
-    }
-    return true;
-}
 
 // Checks : min. one number only number
 bool isValidNumber(const std::string& text) {
@@ -51,15 +40,52 @@ bool readInput(const std::string& prompt, std::string& input) {
     return true;
 }
 
+bool readPassword(const std::string& prompt, std::string& password) {
+    std::cout << prompt << std::flush;
+
+    termios oldSettings{};
+    bool echoDisabled = false;
+
+    // Prüfen, ob stdin ein Terminal ist
+    if (isatty(STDIN_FILENO)) {
+        if (tcgetattr(STDIN_FILENO, &oldSettings) == -1) {
+            return false;
+        }
+
+        termios newSettings = oldSettings;
+
+        // Passworteingabe unsichtbar machen
+        newSettings.c_lflag &= ~ECHO;
+
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &newSettings) == -1) {
+            return false;
+        }
+
+        echoDisabled = true;
+    }
+
+    // Passwort einlesen
+    bool ok = static_cast<bool>(std::getline(std::cin, password));
+
+    // Alte Einstellungen wiederherstellen
+    if (echoDisabled) {
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &oldSettings) == -1) {
+            return false;
+        }
+
+        std::cout << '\n';
+    }
+
+    return ok;
+}
+
+
 // read und checks the username
 bool readUsername(const std::string& prompt, std::string& name) {
     if (!readInput(prompt, name)) {
         return false;
     }
-    if (!isValidUsername(name)) {
-        std::cerr << "Invalid username: max. 8 char, only a-z and 0-9\n";
-        return false;
-    }
+    
     return true;
 }
 
@@ -77,16 +103,30 @@ bool readMessageNumber(std::string& number) {
 
 }
 
-MailerClient::MailerClient(int socketFd) : m_socketFd(socketFd) {}
+MailerClient::MailerClient(int socketFd) 
+: m_socketFd(socketFd),
+  m_loggedIn(false),
+  m_connected(true) {}
 
 // shows the Dashboard
+
 void MailerClient::showMenu() {
-    std::cout << "\n--- TW-Mailer ---\n"
-              << "1  Send message\n"
-              << "2  List message\n"
-              << "3  Read message\n"
-              << "4  Delete message\n"
-              << "5  Quit\n";
+    std::cout << "\n--- TW-Mailer ---\n";
+
+    // Show login status
+    if (m_loggedIn) {
+        std::cout << "Status: logged in\n";
+    } else {
+        std::cout << "Status: not logged in\n";
+    }
+
+    // Show menu options
+    std::cout << "1  Login\n"
+              << "2  Send message\n"
+              << "3  List messages\n"
+              << "4  Read message\n"
+              << "5  Delete message\n"
+              << "6  Quit\n";
 }
 
 // reads the Commands for the correct function
@@ -96,40 +136,109 @@ void MailerClient::run() {
     while (true) {
         showMenu();
 
-        if (!readInput("Option: ", choice)) {
-            sendAll("QUIT\n"); //  EOF quits correct
+        std::cout << "Choose option (1 to 6): ";
+
+        if (!std::getline(std::cin, choice)) {
+            sendAll("QUIT\n");
+            m_loggedIn = false;
+            std::cout << "\nInput ended. Disconnected from server.\n";
             return;
         }
 
-        // Only one char is valid
-        if (choice.size() != 1) {
-            std::cerr << "Option invalid: please enter 1 to 5 \n";
+        if (choice.length() != 1) {
+            std::cerr << "Invalid option. Choose 1 to 6.\n";
             continue;
         }
 
         switch (choice[0]) {
             case '1':
+                login();
+                break;
+
+            case '2':
                 sendMessage();
                 break;
-            case '2':
+
+            case '3':
                 listMessages();
                 break;
-            case '3':
+
+            case '4':
                 readMessage();
                 break;
-            case '4':
+
+            case '5':
                 deleteMessage();
                 break;
-            case '5':
-                sendAll("QUIT\n"); // Server answers with QUIT
-                std::cout << "logged off.\n";
+
+            case '6':
+                // Send QUIT. No QUIT response expected.
+                sendAll("QUIT\n");
+                m_loggedIn = false;
+                std::cout << "Disconnected from server.\n";
                 return;
+
             default:
-                std::cerr << "Invalid option: please enter 1 to 5 \n";
+                std::cerr << "Invalid option. Choose 1 to 6.\n";
                 break;
         }
+
+         // Check connection after each command
+    if (!m_connected) {
+        std::cerr << "Connection lost. Client exits.\n";
+        m_loggedIn = false;
+        return;
+    }
     }
 }
+
+
+void MailerClient::login() {
+    std::string username;
+    std::string password;
+
+    // 1. Read username
+    if (!readInput("Username: ", username)) {
+        return;
+    }
+
+    // 2. Read password
+    if (!readPassword("Password: ", password)) {
+    std::cerr << "Password input failed.\n";
+    return;
+}
+
+    // 3. Check empty input
+    if (username.empty() || password.empty()) {
+        std::cerr << "Username and password must not be empty.\n";
+        return;
+    }
+
+    // 4. Build LOGIN request
+    std::string request =
+        "LOGIN\n" + username + "\n" + password + "\n";
+
+    // 5. Send request
+    if (!sendAll(request)) {
+        return;
+    }
+
+    // 6. Read server response
+    std::string response;
+    if (!readLine(response)) {
+        return;
+    }
+
+    // 7. Check login result
+    if (response == "OK") {
+        m_loggedIn = true;
+        std::cout << "Login successful.\n";
+    } else {
+        m_loggedIn = false;
+        std::cerr << "Login failed (" << response << ").\n";
+    }
+}
+
 
 // sends all Bytes, even if send() only get one part
 bool MailerClient::sendAll(const std::string& data) {
@@ -137,7 +246,6 @@ bool MailerClient::sendAll(const std::string& data) {
 
     while (totalSent < data.size()) {
         // MSG_NOSIGNAL prevent crash with SIGPIPE,
-        // falls der Server die Verbindung geschlossen hat
         ssize_t bytesSent = send(
             m_socketFd,
             data.c_str() + totalSent,
@@ -145,20 +253,29 @@ bool MailerClient::sendAll(const std::string& data) {
             MSG_NOSIGNAL
         );
 
-        if (bytesSent <= 0) {
-    if (bytesSent == -1) {
-        perror("send failed");
-    } else {
-        std::cerr << "no data sended\n";
+       if (bytesSent == -1) {
+
+    // Interrupted system call: retry
+    if (errno == EINTR) {
+        continue;
     }
+
+    perror("send failed");
+    m_connected = false;
     return false;
 }
 
-        totalSent += static_cast<size_t>(bytesSent);
+    if (bytesSent == 0) {
+        std::cerr << "Connection closed while sending.\n";
+        m_connected = false;
+        return false;
     }
 
-    return true;
-}
+            totalSent += static_cast<size_t>(bytesSent);
+        }
+
+        return true;
+    }
 
 // Reads only one line till ('\n') from the Server
 bool MailerClient::readLine(std::string& line) {
@@ -173,168 +290,208 @@ bool MailerClient::readLine(std::string& line) {
         char buffer[1024];
         ssize_t bytesReceived = recv(m_socketFd, buffer, sizeof(buffer), 0);
 
+        
         if (bytesReceived == -1) {
+
+            // Interrupted system call: retry
+            if (errno == EINTR) {
+                continue;
+            }
+
             perror("recv failed");
-            return false;
-        }
-        if (bytesReceived == 0) {
-            std::cerr << "Server ends the connection\n";
+            m_connected = false;
             return false;
         }
 
-        m_readBuffer.append(buffer, static_cast<size_t>(bytesReceived));
+        if (bytesReceived == 0) {
+            std::cerr << "Server ends the connection\n";
+            m_connected = false;
+            return false;
+        }
+
+        m_readBuffer.append(
+            buffer,
+            static_cast<size_t>(bytesReceived)
+        );
+
     }
 }
 
-// SEND\n<Sender>\n<Client>\n<subject>\n<message...>\n.\n
+
+ // SEND\n<receiver>\n<subject>\n<text>\n.\n
 void MailerClient::sendMessage() {
-    std::string sender;
     std::string receiver;
     std::string subject;
 
-    if (!readUsername("Sender: ", sender)) {
-        return;
-    }
+    // 1. Read receiver
     if (!readUsername("receiver: ", receiver)) {
         return;
     }
+
+    // 2. Read subject
     if (!readInput("subject (max. 80 char): ", subject)) {
         return;
     }
+
     if (subject.empty() || subject.size() > MAX_SUBJECT_LENGTH) {
-        std::cerr << "invalid subject 1 to 80 Zeichen allowed\n";
+        std::cerr << "Invalid subject. 1 to 80 characters allowed.\n";
         return;
     }
 
-    std::string request = "SEND\n" + sender + "\n" + receiver + "\n" + subject + "\n";
+    // 3. Build SEND request without sender
+    std::string request = "SEND\n" + receiver + "\n" + subject + "\n";
 
-    std::cout << "Enter the Mail. One Line with only \".\" end the input:\n";
+    // 4. Read message body
+    std::cout << "Enter the Mail. One line with only \".\" ends the input:\n";
 
     std::string line;
     while (true) {
         if (!std::getline(std::cin, line)) {
-            std::cerr << "Input failed message can not be sent\n";
+            std::cerr << "Input failed. Message cannot be sent.\n";
             return;
         }
+
         request += line + "\n";
+
         if (line == ".") {
             break;
         }
     }
 
+    // 5. Send request
     if (!sendAll(request)) {
         return;
     }
 
+    // 6. Read server response
     std::string response;
     if (!readLine(response)) {
         return;
     }
 
+    // 7. Check response
     if (response == "OK") {
         std::cout << "Message sent.\n";
     } else {
-        std::cerr << "Server reports an error: " << response << "\n";
+        std::cerr << "SEND failed (" << response
+                  << "). Not logged in or message rejected.\n";
     }
 }
 
+
 // LIST\n<username>\n
+
 void MailerClient::listMessages() {
-    std::string username;
-    if (!readUsername("Username: ", username)) {
+
+    // 1. Send LIST request to server
+    if (!sendAll("LIST\n")) {
         return;
     }
 
-    if (!sendAll("LIST\n" + username + "\n")) {
-        return;
-    }
-
-    // First Line: count the message
+    // 2. Read message count from server
     std::string countLine;
     if (!readLine(countLine)) {
         return;
     }
 
+    // Server reports an error
+    if (countLine == "ERR") {
+        std::cerr << "Server rejected LIST (not logged in?)\n";
+        return;
+    }
+
+
+    // 3. Convert count to integer
     int count = 0;
     try {
         count = std::stoi(countLine);
     } catch (...) {
-        std::cerr << "Invalid answer from the server: " << countLine << "\n";
+        std::cerr << "Invalid answer from the server: "
+                  << countLine << "\n";
         return;
     }
 
-    std::cout << "message count" << count << "\n";
+    std::cout << "message count: " << count << "\n";
 
-    // each message 
+    // 4. Read and print each subject
     for (int i = 0; i < count; ++i) {
         std::string subject;
+
         if (!readLine(subject)) {
             return;
         }
+
         std::cout << (i + 1) << ": " << subject << "\n";
     }
 }
 
+
 // READ\n<username>\n<message number>\n
+
 void MailerClient::readMessage() {
-    std::string username;
     std::string number;
 
-    if (!readUsername("username: ", username)) {
-        return;
-    }
+    // 1. Read message number
     if (!readMessageNumber(number)) {
         return;
     }
 
-    if (!sendAll("READ\n" + username + "\n" + number + "\n")) {
+    // 2. Send READ request
+    if (!sendAll("READ\n" + number + "\n")) {
         return;
     }
 
+    // 3. Read server response
     std::string response;
     if (!readLine(response)) {
         return;
     }
 
+    // 4. Check response
     if (response != "OK") {
-        std::cerr << "Message not found (" << response << ")\n";
+        std::cerr << "READ failed ("
+                  << response << "). Message not found or not logged in.\n";
         return;
     }
 
-    // server did not get the message ".\n"
+    // 5. Read message until "."
     std::string line;
     while (readLine(line)) {
         if (line == ".") {
             break;
         }
+
         std::cout << line << "\n";
     }
 }
 
+
 // DEL\n<username>\n<messagenumber>\n
+
 void MailerClient::deleteMessage() {
-    std::string username;
     std::string number;
 
-    if (!readUsername("username: ", username)) {
-        return;
-    }
+    // 1. Read message number
     if (!readMessageNumber(number)) {
         return;
     }
 
-    if (!sendAll("DEL\n" + username + "\n" + number + "\n")) {
+    // 2. Send DEL request
+    if (!sendAll("DEL\n" + number + "\n")) {
         return;
     }
 
+    // 3. Read server response
     std::string response;
     if (!readLine(response)) {
         return;
     }
 
+    // 4. Check response
     if (response == "OK") {
         std::cout << "Message deleted.\n";
     } else {
-        std::cerr << "Deletion failed (" << response << ")\n";
+        std::cerr << "DEL failed ("
+                  << response << "). Message not found or not logged in.\n";
     }
 }
