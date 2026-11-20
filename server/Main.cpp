@@ -218,6 +218,42 @@ bool check_ldap_login(const std::string& username, const std::string& password){
     return rc == LDAP_SUCCESS;
 }
 
+//mail spool -------------------------------------------------------------------------
+
+//collects all number.txt message ids for user in asc order
+std::vector<int> get_user_message_ids_locked(const std::string& user_dir){
+    std::vector<int> ids;
+    if(!fs::exists(user_dir) || !fs::is_directory(user_dir)){
+        return ids;
+    }
+
+    for(const auto& entry : fs::directory_iterator(user_dir)){
+        if(!entry.is_regular_file()){
+            continue;
+        }
+        std::string filename = entry.path().filename().string();
+        if(filename.size() <= 4 || filename.substr(filename.size() - 4) != ".txt"){
+            continue;
+        }
+
+        std::string number_part = filename.substr(0, filename.size() - 4);
+        bool all_digits = !number_part.empty();
+        for (char c : number_part)
+        {
+            if(!std::isdigit(static_cast<unsigned char>(c))){
+                all_digits = false;
+                break;
+            }
+        }
+        if (all_digits){
+            ids.push_back(std::stoi(number_part));
+        }
+    }
+    std::sort(ids.begin(), ids.end());
+    return ids;
+}
+
+//client session ---------------------------------------------------
 
 
 
