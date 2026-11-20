@@ -148,8 +148,21 @@ bool is_ip_blacklisted(const std::string& ip, const std::string& blacklist_file)
     if(changed){
         save_blacklist_locked(blacklist_file);
     }
-
     return g_blacklisted_ips.find(ip) != g_blacklisted_ips.end();
+}
+
+//records a failed login for username, ip, after 3 failed attempts, blacklist ip for 60 secs
+void record_failed_login(const std::string& ip, const std::string& username, const std::string& blacklist_file){
+    std::lock_guard<std::mutex> lock(g_auth_mutex);
+
+    auto key = std::make_pair(ip, username);
+    g_failed_attempts[key] += 1;
+
+    if(g_failed_attempts[key] >= MAX_FAILED_ATTEMPTS){
+        g_blacklisted_ips[ip] = std::time(nullptr) + BLACKLIST_DURATION_SEC;
+        g_failed_attempts[key] = 0;
+        save_blacklist_locked(blacklist_file);
+    }
 }
 
 
