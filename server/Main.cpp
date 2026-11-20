@@ -258,123 +258,188 @@ std::vector<int> get_user_message_ids_locked(const std::string& user_dir){
 
 
 //handles individual client communication
-void handle_client(int client_fd, const std::string &spoolDir){
+void handle_client(int client_fd, std::string client_ip, std::string spool_dir, std::string blacklist_file){
     std::string command;
+    std::string read_buffer;
+    std::string current_user;
+    bool logged_in = false;
 
-    while(read_line(client_fd, command)){
-        if (command == "QUIT"){break;}      
-        else if(command == "SEND"){
-            std::string sender, reciever, subject, line, message = "";
-            read_line(client_fd, sender);
-            read_line(client_fd, reciever);
-            read_line(client_fd, subject);
+    while(read_line(client_fd, read_buffer, command)){
+        if (command == "QUIT"){break;}   
+        
+        if(command == "LOGIN"){
+            std::string user, password;
+            if(!read_line(client_fd, read_buffer, user) || !read_line(client_fd, read_buffer, password)){
+                break;
+            }
+            if(is_ip_blacklisted(client_ip, blacklist_file)){
+                write_all(client_fd, "ERR\n");
+                continue;
+            }
+
+            if(check_ldap_login(user, password)){
+                reset_failed_logins(client_ip, user);
+                logged_in = true;
+                current_user = user;
+                write_all(client_fd, "OK\n");
+            } else {
+                record_failed_login(client_ip, user, blacklist_file);
+                logged_in = false;
+                current_user.clear();
+                write_all(client_fd, "ERR\n");
+            }
+            continue;
+        }
+        
+        //everything outside login and quit requires an active login session
+        if(!logged_in){
+            write_all(client_fd, "ERR\n");
+            continue;
+        }
+
+        if(command == "SEND"){
+
+            std::string receiver, subject, line, message;
+            if(!read_line(client_fd, read_buffer, receiver) || !read_line(client_fd, read_buffer, subject)){
+                break;
+            }
 
             //read messages line until "."
-            while (read_line(client_fd, line)){
+            while (read_line(client_fd, read_buffer, line)){
                 if(line == "."){break;}
                 message += line + "\n";   
             }
 
-            std::string userDir = spoolDir + "/" + reciever;
-            fs::create_directories(userDir);
-
-            int msgID = 1;
-            for(const auto &entry : fs::directory_iterator(userDir)){
-                if(entry.is_regular_file()){
-                    msgID++;
-                }
+            if(receiver.empty() || subject.size() > 80){
+                write_all(client_fd, "ERR\n");
+                continue;
             }
 
-            //save sender, reciever, subject, and message content into userDir/<msgID>.txt
-            std::ofstream outFile(userDir + "/" + std::to_string(msgID) + ".txt");
-            outFile << sender << "\n";
-            outFile << reciever << "\n";
-            outFile << subject << "\n";
-            outFile << message;
-            outFile.close();
+            std::lock_guard<std::mutex> lock(g_spool_mutex);
+            std::string user_dir = spool_dir + "/" + receiver;
+            fs::create_directories(user_dir);
 
-            std::string response = "OK\n";
-            write(client_fd, response.c_str(), response.size());
+            std::vector<int> ids = get_user_message_ids_locked(user_dir);
+            int next_id = ids.empty() ? 1 : (ids.back() + 1);
+
+            std::string file_path = user_dir + "/" + std::to_string(next_id) + ".txt";
+            std::ofstream out_file(file_path);
+            if (!out_file.is_open()) {
+                write_all(client_fd, "ERR\n");
+                continue;
+            }
+
+            out_file << current_user << "\n";
+            out_file << receiver << "\n";
+            out_file << subject << "\n";
+            out_file << message;
+            out_file.close();
+
+            write_all(client_fd, "OK\n");
         }
+
         else if(command == "LIST"){
-            std::string username;
-            read_line(client_fd, username);
 
             //count no. of messages of the user, send the count and each message's index and subject
-            std::string userDir = spoolDir + "/" + username;
-            int count = 0;
-            std::string listDetails = "";
+            std::lock_guard<std::mutex> lock(g_spool_mutex);
+            std::string user_dir = spool_dir + "/" + current_user;
+            std::vector<int> ids = get_user_message_ids_locked(user_dir);
 
-            if(fs::exists(userDir) && fs::is_directory(userDir)){
-                for(int i = 1; ; ++i){
-                    std::string filePath = userDir + "/" + std::to_string(i) + ".txt";
-                    if (!fs::exists(filePath)) break;
+            std::string list_lines;
 
-                    count++;
-                    std::ifstream inFile(filePath);
-                    std::string s, r, subj;
-                    std::getline(inFile, s);
-                    std::getline(inFile, r);
-                    std::getline(inFile, subj);
+                for(int id : ids){
+                    std::string file_path = user_dir + "/" + std::to_string(id) + ".txt";
+                    std::ifstream in_file(file_path);
+                    std::string sender, receiver, subj;
+                    std::getline(in_file, sender);
+                    std::getline(in_file, receiver);
+                    std::getline(in_file, subj);
             
-                    listDetails += subj + "\n";
+                    list_lines += subj + "\n";
                 }
-            }
+            
 
-            std::string response = std::to_string(count) + "\n" + listDetails;
-            write(client_fd, response.c_str(), response.size());
+            std::string response = std::to_string(ids.size()) + "\n" + list_lines;
+            write_all(client_fd, response);
 
         } else if (command == "READ"){
-            std::string username, msgNumber;
-
-            read_line(client_fd, username);
-            read_line(client_fd, msgNumber);
-
-            std::string filePath = spoolDir + "/" + username + "/" + msgNumber + ".txt";
-            if(fs::exists(filePath)){
-                std::ifstream inFile(filePath);
-                std::string fileContent = "";
-                std::string line;
-                while(std::getline(inFile, line)){
-                    fileContent += line + "\n";
-                }
-                std::string response = "OK\n" + fileContent + ".\n";
-                write(client_fd, response.c_str(), response.size());
-            } else {
-                std::string response = "ERR\n";
-                write(client_fd, response.c_str(), response.size());
+            std::string msg_num_str;
+            if (!read_line(client_fd, read_buffer, msg_num_str)){
+                break;
             }
+
+            int msg_num = 0;
+            try{
+                msg_num = std::stoi(msg_num_str);
+            } catch(...){
+                msg_num = -1;
+            }
+
+            std::lock_guard<std::mutex> lock(g_spool_mutex);
+            std::string user_dir = spool_dir + "/" + current_user;
+            std::vector<int> ids = get_user_message_ids_locked(user_dir);
+
+            if(msg_num < 1 || static_cast<size_t>(msg_num) > ids.size()){
+                write_all(client_fd, "ERR\n");
+                continue;
+            }
+
+            int actual_id = ids[static_cast<size_t>(msg_num - 1)];
+            std::string file_path = user_dir + "/" + std::to_string(actual_id) + ".txt";
+            std::ifstream in_file(file_path);
+            if (!in_file.is_open()){
+                write_all(client_fd, "ERR\n");
+                continue;
+            }
+
+            std::string file_content, line;
+            while (std::getline(in_file, line)){
+                file_content += line + "\n";
+            }
+
+            std::string response = "OK\n" + file_content + ".\n";
+            write_all(client_fd, response);
 
         }else if (command == "DEL"){
-            std::string username, msgNumber;
-            read_line(client_fd, username);
-            read_line(client_fd, msgNumber);
+            std::string msg_num_str;
 
-            std::string userDir = spoolDir + "/" + username;
-            std::string filePath = userDir + "/" + msgNumber + ".txt";
-            if (fs::exists(filePath)) {
-                fs::remove(filePath);
-
-                int deletedIdx = std::stoi(msgNumber);
-                for (int i = deletedIdx + 1; ; ++i) {
-                        std::string oldPath = userDir + "/" + std::to_string(i) + ".txt";
-                        std::string newPath = userDir + "/" + std::to_string(i - 1) + ".txt";
-                        if (fs::exists(oldPath)) {
-                             fs::rename(oldPath, newPath);
-                        } else {
-                            break;
-                        }
-                    }
-                std::string response = "OK\n";
-                 write(client_fd, response.c_str(), response.size());
-            } else {
-                std::string response = "ERR\n";
-                write(client_fd, response.c_str(), response.size());
+            if(!read_line(client_fd, read_buffer, msg_num_str)){
+                break;
             }
+
+            int msg_num = 0;
+            try{
+                msg_num = std::stoi(msg_num_str);
+            } catch(...){
+                msg_num = -1;
+            }
+
+            std::lock_guard<std::mutex> lock(g_spool_mutex);
+            std::string user_dir = spool_dir + "/" + current_user;
+            std::vector<int> ids = get_user_message_ids_locked(user_dir);
+
+            if (msg_num < 1 || static_cast<size_t>(msg_num) > ids.size()) {
+                write_all(client_fd, "ERR\n");
+                continue;
+            }
+            int actual_id = ids[static_cast<size_t>(msg_num - 1)];
+            std::string file_path = user_dir + "/" + std::to_string(actual_id) + ".txt";
+            if (fs::remove(file_path)) {
+                write_all(client_fd, "OK\n");
+            } else {
+                write_all(client_fd, "ERR\n");
+            }
+        } else {
+            write_all(client_fd, "ERR\n");
         }
-    } 
-    std::cout << "Communicating with client on socket descriptor: " << client_fd << "\n";
+    }
+
+    close(client_fd);
+    std::cout << "Client disconnected (" << client_ip << ", fd " << client_fd << ")\n";
 }
+
+
+// main ------------------------------------------------------------------
 
 int main(int argc, char *argv[]) {
     if(argc < 3){
@@ -383,7 +448,7 @@ int main(int argc, char *argv[]) {
     }
 
     int port = std::stoi(argv[1]);
-    std::string spoolDir = argv[2];
+    std::string spool_dir = argv[2];
 
     //create server socket, ipv4, tcp
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -415,10 +480,10 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    std::cout << "Server listening on port " << port << " | Spool directory: " << spoolDir << "\n";
+    std::cout << "Server listening on port " << port << " | Spool directory: " << spool_dir << "\n";
     
     // creating mail spool dir
-    mkdir(spoolDir.c_str(), 0777);
+    mkdir(spool_dir.c_str(), 0777);
 
     //iterative main loop
     while (true){
@@ -435,7 +500,7 @@ int main(int argc, char *argv[]) {
         std::cout << "Connection established with client. \n";
         
         //handle client session
-        handle_client(client_fd, spoolDir);
+        handle_client(client_fd, spool_dir);
 
         //close client socket after disconnect
         close(client_fd);
