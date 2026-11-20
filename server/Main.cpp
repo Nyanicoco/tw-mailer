@@ -165,6 +165,58 @@ void record_failed_login(const std::string& ip, const std::string& username, con
     }
 }
 
+// clears failure counter after login
+void reset_failed_logins(const std::string& ip, const std::string& username){
+    std::lock_guard<std::mutex> lock(g_auth_mutex);
+    g_failed_attempts.erase(std::make_pair(ip, username));
+}
+
+//checks username and password against ldap server using openldap c-api
+bool check_ldap_login(const std::string& username, const std::string& password){
+    if (username.empty() || password.empty()){
+        return false;
+    }
+
+    std::string uri = "ldap://" + std::string(LDAP_HOST) + ":" + std::to_string(LDAP_PORT);
+    LDAP* ld = nullptr;
+
+    if (ldap_initialize(&ld, uri.c_str()) != LDAP_SUCCESS || ld == nullptr){
+        return false;
+    }
+
+    int protocol_version = LDAP_VERSION3;
+    ldap_set_option(ld, LDAP_OPT_PROTOCOL_VERSION, &protocol_version);
+
+    // Default dn, if search finds a better dn, use that instead
+    std::string user_dn = "uid=" + username + "," + LDAP_BASE_DN;
+
+    LDAPMessage* search_result = nullptr;
+    std::string filter = "(uid=" + username + ")";
+    char* attrs[] = {nullptr};
+
+    if (ldap_search_ext_s(ld, LDAP_BASE_DN, LDAP_SCOPE_SUBTREE, filter.c_str(),
+                          attrs, 0, nullptr, nullptr, nullptr, 0, &search_result) == LDAP_SUCCESS){
+        LDAPMessage* entry = ldap_first_entry(ld, search_result);
+        if (entry != nullptr) {
+            char* dn_ptr = ldap_get_dn(ld, entry);
+            if (dn_ptr != nullptr){
+                user_dn = dn_ptr;
+                ldap_memfree(dn_ptr);
+            }
+        }
+        ldap_msgfree(search_result);
+    }
+
+    BerValue cred;
+    cred.bv_val = const_cast<char*>(password.data());
+    cred.bv_len = static_cast<ber_len_t>(password.size());
+
+    int rc = ldap_sasl_bind_s(ld, user_dn.c_str(), LDAP_SASL_SIMPLE, &cred,
+                              nullptr, nullptr, nullptr);
+
+    ldap_unbind_ext_s(ld, nullptr, nullptr);
+    return rc == LDAP_SUCCESS;
+}
 
 
 
