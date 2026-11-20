@@ -130,6 +130,30 @@ void load_blacklist(const std::string& blacklist_file){
     }
 }
 
+//checks if ip is blacklisted, removes expired bans
+bool is_ip_blacklisted(const std::string& ip, const std::string& blacklist_file){
+    std::lock_guard<std::mutex> lock(g_auth_mutex);
+    std::time_t now = std::time(nullptr);
+    bool changed = false;
+
+    for(auto it = g_blacklisted_ips.begin(); it != g_blacklisted_ips.end();){
+        if (it->second <= now){
+            it = g_blacklisted_ips.erase(it);
+            changed = true;
+        } else {
+            ++it;
+        }
+    }
+
+    if(changed){
+        save_blacklist_locked(blacklist_file);
+    }
+
+    return g_blacklisted_ips.find(ip) != g_blacklisted_ips.end();
+}
+
+
+
 
 
 //handles individual client communication
