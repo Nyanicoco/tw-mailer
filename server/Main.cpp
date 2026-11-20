@@ -7,6 +7,15 @@
 #include <sys/stat.h>
 #include <fstream>
 #include <filesystem>
+#include <arpa/inet.h>
+#include <cerrno>
+#include <ldap.h>
+#include <map>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
 
 namespace fs = std::filesystem;
 
