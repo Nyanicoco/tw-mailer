@@ -98,7 +98,17 @@ bool write_all(int fd, const std::string& msg){
 
 //blacklist & LDAP auth ---------------------------------------------------------
 
-
+//saves blacklisted ips to disk to keep the blacklist
+void save_blacklist_locked(const std::string& blacklist_file){
+    std::ofstream out(blacklist_file, std::ios::trunc);
+    if(!out.is_open()){
+        std::cerr << "Could not write blacklist file: " << blacklist_file << "\n";
+        return;
+    }
+    for(const auto& pair : g_blacklisted_ips){
+        out << pair.first << " " << pair.second << "\n";
+    }
+}
 
 //handles individual client communication
 void handle_client(int client_fd, const std::string &spoolDir){
