@@ -19,26 +19,86 @@
 
 namespace fs = std::filesystem;
 
-//to read a single line ending with "\n" from socket
-bool read_line(int fd, std::string &line){
-    line.clear();
-    char c;
-    while (true)
-    {
-        ssize_t n = read(fd, &c, 1);
-        if(n < 0){
-            if(errno ==EINTR) continue;
+//constants for LDAP and login limiting
+const char* LDAP_HOST = "ldap.technikum-wien.at";
+const int LDAP_PORT = 389;
+const char* LDAP_BASE_DN = "dc=technikum-wien, dc=at";
+const int MAX_FAILED_ATTEMPTS = 3;
+const int BLACKLIST_DURATION_SEC = 60;
+
+//shared state protected - aginst client threads 
+std::mutex g_auth_mutex;
+std::mutex g_spool_mutex;
+
+// maps client ip, username to number of failed login attempts
+std::map<std::pair<std::string, std::string>, int> g_failed_attempts;
+
+//maps client ip to unix timestamp when the 60 sec ban expired
+std::map<std::string, std::time_t> g_blacklisted_ips;
+
+
+//Socket read / write ---------------------------------------------
+
+//to reads single line ending with "\n" from socket
+//uses per-connection buffer
+bool read_line(int fd, std::string& buffer, std::string& out_line){
+    out_line.clear();
+    
+    while (true) {
+        size_t newline_pos = buffer.find('\n');
+        if (newline_pos != std::string::npos) {
+            out_line = buffer.substr(0, newline_pos);
+            buffer.erase(0, newline_pos + 1);
+
+            // Remove '\r' if client sends CRLF ("\r\n")
+            if (!out_line.empty() && out_line.back() == '\r'){
+                out_line.pop_back();
+            }
+            return true;
+        }
+
+        char temp[1024];
+        ssize_t n = read(fd, temp, sizeof(temp));
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue; // interrupted by signal, try again
+            }
             return false;
-        } else if(n == 0){
-            return false; //connection closed by client
         }
-        if(c == '\n'){
-            break;
+        if (n == 0) {
+            // Client closed the connection
+            if (!buffer.empty()){
+                out_line = buffer;
+                buffer.clear();
+                return true;
+            }
+            return false;
         }
-        line+= c;
+        buffer.append(temp, n);
     }
-    return true;   
 }
+
+bool write_all(int fd, const std::string& msg){
+    size_t sent_total = 0;
+    while(sent_total < msg.size()){
+        ssize_t sent = write(fd, msg.data() + sent_total, msg.size() - sent_total);
+        if (sent < 0){
+            if (errno == EINTR){
+                continue;
+            }
+            return false;
+        }
+        if(sent == 0){
+            return false;
+        }
+        sent_total += static_cast<size_t>(sent);
+    }
+    return true;
+}
+
+//blacklist & LDAP auth ---------------------------------------------------------
+
+
 
 //handles individual client communication
 void handle_client(int client_fd, const std::string &spoolDir){
