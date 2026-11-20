@@ -449,6 +449,7 @@ int main(int argc, char *argv[]) {
 
     int port = std::stoi(argv[1]);
     std::string spool_dir = argv[2];
+    std::string blacklist_file = spool_dir + "/blacklist.txt"; 
 
     //create server socket, ipv4, tcp
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -461,23 +462,22 @@ int main(int argc, char *argv[]) {
     int opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-    struct sockaddr_in address;
-
-    memset(&address, 0, sizeof(address));
+    sockaddr_in address{};
     address.sin_family = AF_INET;
-    address.sin_port = htons(port);
+    address.sin_port = htons(static_cast<uint16_t>(port));
     address.sin_addr.s_addr = htonl(INADDR_ANY);
 
     //binding socket to port
-    if(bind(server_fd, (struct sockaddr *) &address, sizeof(address))){
+    if(bind(server_fd, reinterpret_cast<sockaddr*> (&address), sizeof(address)) < 0){
         perror("bind error");
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     //start listening for connections (backlog 5)
-    if (listen(server_fd, 5) < 0){
+    if (listen(server_fd, 10) < 0){
         perror("listen error");
-        exit(EXIT_FAILURE);
+        close(server_fd);
+        return EXIT_FAILURE;
     }
 
     std::cout << "Server listening on port " << port << " | Spool directory: " << spool_dir << "\n";
@@ -487,24 +487,29 @@ int main(int argc, char *argv[]) {
 
     //iterative main loop
     while (true){
-        struct sockaddr_in cli_addr;
+        sockaddr_in cli_addr{};
         socklen_t client_len = sizeof(cli_addr);
 
         //block & wait for client to connect
-        int client_fd = accept(server_fd, (struct  sockaddr *)&cli_addr, &client_len);
+        int client_fd = accept(server_fd, reinterpret_cast<sockaddr*> (&cli_addr), &client_len);
         if (client_fd < 0)
         {
+            if (errno == EINTR) {
+                continue;
+            }
             perror("accept error");
             continue;
         }
-        std::cout << "Connection established with client. \n";
-        
-        //handle client session
-        handle_client(client_fd, spool_dir);
 
-        //close client socket after disconnect
-        close(client_fd);
-        std::cout << "Client connection closed. \n";
+        char ip_str[INET_ADDRSTRLEN] = "unknown";
+        inet_ntop(AF_INET, &cli_addr.sin_addr, ip_str, sizeof(ip_str));
+        std::string client_ip(ip_str);
+
+        std::cout << "Connection established from " << client_ip << " (fd " << client_fd << ")\n";
+        
+       //spawn a thread for each connected client - multiple clients can be served 
+        std::thread client_thread(handle_client, client_fd, client_ip, spool_dir, blacklist_file);
+        client_thread.detach();
     }
     
     //close listening socket
