@@ -110,6 +110,28 @@ void save_blacklist_locked(const std::string& blacklist_file){
     }
 }
 
+void load_blacklist(const std::string& blacklist_file){
+    std::lock_guard<std::mutex> lock(g_auth_mutex);
+    g_blacklisted_ips.clear();
+
+    std::ifstream in(blacklist_file);
+    if (!in.is_open()) {
+        return; //file might not exist on first run
+    }
+
+    std::string ip;
+    std::time_t expires_at = 0;
+    std::time_t now = std::time(nullptr);
+
+    while (in >> ip >> expires_at){
+        if (expires_at > now) {
+            g_blacklisted_ips[ip] = expires_at;
+        }
+    }
+}
+
+
+
 //handles individual client communication
 void handle_client(int client_fd, const std::string &spoolDir){
     std::string command;
